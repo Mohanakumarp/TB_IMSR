@@ -1,0 +1,5 @@
+express 
+cors 
+dotenv 
+@supabase/supabase-js 
+jsonwebtoken

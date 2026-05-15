@@ -1,0 +1,3 @@
+@supabase/supabase-js 
+@react-native-async-storage/async-storage
+axios
