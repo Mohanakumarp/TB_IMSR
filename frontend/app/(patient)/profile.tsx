@@ -1,0 +1,97 @@
+// app/(patient)/profile.tsx
+import React from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { mockLoggedInPatient } from '../../mock/data';
+import { useAuth } from '../../context/AuthContext';
+import { useRouter } from 'expo-router';
+
+export default function PatientProfile() {
+  const patient = mockLoggedInPatient;
+  const { logout } = useAuth();
+  const router = useRouter();
+
+  const handleLogout = () => {
+    logout();
+    router.replace('/(auth)/login');
+  };
+
+  const getInitials = (name: string) => {
+    return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      <View style={styles.headerSection}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{getInitials(patient.name)}</Text>
+        </View>
+        <Text style={styles.patientName}>{patient.name}</Text>
+        <Text style={styles.opNumberBadge}>{patient.opNumber}</Text>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Contact Information</Text>
+        <View style={styles.card}>
+          <View style={styles.infoRow}>
+            <View style={styles.iconBox}><Ionicons name="call-outline" size={20} color="#BA1A21" /></View>
+            <View style={styles.infoTextContainer}>
+              <Text style={styles.infoLabel}>Phone Number</Text>
+              <Text style={styles.infoValue}>{patient.phoneNumber}</Text>
+            </View>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.infoRow}>
+            <View style={styles.iconBox}><Ionicons name="location-outline" size={20} color="#BA1A21" /></View>
+            <View style={styles.infoTextContainer}>
+              <Text style={styles.infoLabel}>Home Address</Text>
+              <Text style={styles.infoValue}>{patient.address}</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+
+      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+        <Ionicons name="log-out-outline" size={20} color="#BA1A21" style={styles.logoutIcon} />
+        <Text style={styles.logoutButtonText}>Sign Out</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.versionText}>PSG Hospitals Tumor Board v1.0.0</Text>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F5F5F5', paddingTop: 32 },
+  scrollContent: { padding: 20, paddingBottom: 40 },
+  headerSection: { alignItems: 'center', marginBottom: 32, marginTop: 18 },
+  avatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#BA1A21', // PSG Red Avatar
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    elevation: 4,
+  },
+  avatarText: { fontSize: 28, fontWeight: 'bold', color: '#FFFFFF' },
+  patientName: { fontSize: 24, fontWeight: 'bold', color: '#333333', marginBottom: 8 },
+  opNumberBadge: { backgroundColor: '#E0E0E0', color: '#333333', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, fontSize: 14, fontWeight: '700', overflow: 'hidden' },
+  section: { marginBottom: 24 },
+  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#828282', textTransform: 'uppercase', marginBottom: 12, marginLeft: 4 },
+  card: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, elevation: 2, borderWidth: 1, borderColor: '#E0E0E0' },
+  infoRow: { flexDirection: 'row', alignItems: 'center' },
+  iconBox: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#FDECEA', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  infoTextContainer: { flex: 1 },
+  infoLabel: { fontSize: 12, color: '#828282', marginBottom: 4 },
+  infoValue: { fontSize: 15, fontWeight: '600', color: '#333333' },
+  divider: { height: 1, backgroundColor: '#F5F5F5', marginVertical: 16 },
+  logoutButton: { flexDirection: 'row', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#BA1A21', paddingVertical: 16, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
+  logoutIcon: { marginRight: 8 },
+  logoutButtonText: { color: '#BA1A21', fontSize: 16, fontWeight: 'bold' },
+  versionText: { textAlign: 'center', color: '#828282', fontSize: 12, marginTop: 24 }
+});
