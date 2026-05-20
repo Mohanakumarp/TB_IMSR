@@ -37,10 +37,10 @@ export default function OtpScreen() {
   const phone = params?.phone as string;
   const opid = params?.opid as string;
 
-  let login: ((r: 'doctor'|'patient'|null) => void) | undefined = undefined;
+  let login: ((userData: any) => void) | undefined = undefined;
   try {
     const auth = useAuth();
-    login = auth?.login;
+    login = auth?.login as ((userData: any) => void) | undefined;
   } catch (e) {
     login = undefined;
   }
@@ -101,12 +101,18 @@ export default function OtpScreen() {
         }
 
         // 3. Success! Route based on verified role
+        const backendUser = data.user; // This is the user data returned from our Express DB check
+
         if (role === 'doctor') {
-            if (login) login('doctor');
+            if (login) {
+                login({ role: 'doctor', sessionToken, ...backendUser });
+            }
             router.replace('/(doctor)/dashboard');
         } else {
-            if (login) login('patient');
-            router.replace('/(patient)/home');
+            if (login) {
+                login({ role: 'patient', sessionToken, ...backendUser });
+            }
+            router.replace('/(patient)/dashboard');
         }
 
     } catch (e: any) {

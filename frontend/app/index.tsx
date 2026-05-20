@@ -1,30 +1,34 @@
 // app/index.tsx
-import { Redirect } from 'expo-router';
+import React, { useEffect } from 'react';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
-import { View, ActivityIndicator } from 'react-native';
 
-export default function Index() {
-  const { role } = useAuth();
+export default function IndexScreen() {
+  const { user, isLoading } = useAuth();
+  const router = useRouter();
 
-  // 1. If not logged in, send them to the login screen
-  if (!role) {
-    return <Redirect href="/(auth)/login" />;
-  }
+  useEffect(() => {
+    if (isLoading) return;
 
-  // 2. If it's a doctor, send them to the doctor dashboard
-  if (role === 'doctor') {
-    return <Redirect href="/(doctor)/dashboard" />;
-  }
+    if (user) {
+      if (user.role === 'patient') {
+        router.replace('/(patient)/home');
+      } else if (user.role === 'doctor') {
+        router.replace('/(doctor)/dashboard');
+      }
+    } else {
+      router.replace('/(auth)/login');
+    }
+  }, [user, isLoading]);
 
-  // 3. If it's a patient, send them to the patient dashboard
-  if (role === 'patient') {
-    return <Redirect href="/(patient)/dashboard" />;
-  }
-
-  // Fallback loading spinner just in case
   return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-      <ActivityIndicator size="large" color="#0000ff" />
+    <View style={styles.container}>
+      <ActivityIndicator size="large" color="#BA1A21" />
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F5F5F5' },
+});
