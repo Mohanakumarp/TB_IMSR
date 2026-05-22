@@ -1,14 +1,38 @@
 // app/(doctor)/patient/[id].tsx
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { mockPatientDetails } from '../../../mock/data';
+import { apiGet } from '../../../lib/apiClient';
 import { PatientCardData } from '../../../types';
 
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://192.168.1.100:3000';
+
 export default function PatientDetails() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id } = useLocalSearchParams<{ id: string }>(); // This is the OPID
   const router = useRouter();
-  const patient = id ? mockPatientDetails[id] : null;
+  
+  const [patient, setPatient] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchPatientData = async () => {
+      if (!id) return;
+      try {
+        setLoading(true);
+        const response = await apiGet(`${BACKEND_URL}/api/doctor/patient/${id}`);
+        if (!response.ok) throw new Error("Failed to fetch patient details");
+        
+        const data = await response.json();
+        setPatient(data);
+      } catch (error) {
+        console.error('Patient detail fetch error:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPatientData();
+  }, [id]);
 
   const getStatusStyle = (status: PatientCardData['status']) => {
     switch (status) {
@@ -18,6 +42,14 @@ export default function PatientDetails() {
       default: return { bg: '#FAFAFA', text: '#828282', label: 'UNKNOWN' };
     }
   };
+
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#BA1A21" />
+      </View>
+    );
+  }
 
   if (!patient) {
     return (
@@ -34,7 +66,6 @@ export default function PatientDetails() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-      
       <View style={styles.card}>
         <View style={styles.headerRow}>
           <Text style={styles.opNumber}>{patient.opNumber}</Text>
@@ -70,31 +101,19 @@ export default function PatientDetails() {
       <Text style={styles.lastUpdated}>
         Last updated in EMR: {new Date(patient.lastUpdated).toLocaleDateString()}
       </Text>
-
     </ScrollView>
   );
 }
 
+// ... keep your exact same styles ...
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F5F5' },
   scrollContent: { padding: 20, paddingBottom: 40 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   errorText: { fontSize: 16, color: '#828282', marginBottom: 20 },
-  backButton: { padding: 12, backgroundColor: '#BA1A21', borderRadius: 8 }, // PSG Red Button
+  backButton: { padding: 12, backgroundColor: '#BA1A21', borderRadius: 8 },
   backButtonText: { color: '#FFF', fontWeight: 'bold' },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-  },
+  card: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 20, marginBottom: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2, borderWidth: 1, borderColor: '#E0E0E0' },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   opNumber: { fontSize: 14, fontWeight: 'bold', color: '#828282' },
   patientName: { fontSize: 24, fontWeight: '800', color: '#333333' },
@@ -106,13 +125,7 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, color: '#828282', textTransform: 'uppercase', fontWeight: '600', marginBottom: 4 },
   value: { fontSize: 16, color: '#333333', fontWeight: '500' },
   divider: { height: 1, backgroundColor: '#F5F5F5', marginVertical: 16 },
-  notesBox: {
-    backgroundColor: '#FAFAFA', 
-    borderRadius: 12,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-  },
+  notesBox: { backgroundColor: '#FAFAFA', borderRadius: 12, padding: 20, borderWidth: 1, borderColor: '#E0E0E0' },
   notesText: { fontSize: 15, color: '#333333', lineHeight: 24 },
   lastUpdated: { textAlign: 'center', color: '#828282', fontSize: 12, marginTop: 10 }
 });

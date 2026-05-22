@@ -173,6 +173,99 @@ app.get('/api/patient/:opid/profile', authenticateUser, async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
+// ==========================================
+// DOCTOR APP ROUTES (Protected)
+// ==========================================
+
+// 1. Get Doctor Dashboard (List of Patients & Appointments)
+app.get('/api/doctor/:doctorId/dashboard', authenticateUser, async (req, res) => {
+    const { doctorId } = req.params;
+    
+    try {
+        // Query the appointments table, and join the patients table
+        const { data, error } = await supabase
+            .from('appointments')
+            .select(`
+                appointment_id,
+                appointment_date,
+                status,
+                surgery_required,
+                patients (
+                    opid,
+                    patient_name,
+                    diagnosis
+                )
+            `)
+            .eq('doctor_id', doctorId)
+            .order('appointment_date', { ascending: false });
+
+        if (error) throw error;
+        
+        // Transform the data slightly to match what your frontend expects
+        const formattedData = data.map(apt => ({
+            opNumber: apt.patients?.opid,
+            patientName: apt.patients?.patient_name,
+            procedureName: apt.patients?.diagnosis || (apt.surgery_required ? 'Surgery' : 'Consultation'),
+            scheduledDate: new Date(apt.appointment_date).toLocaleDateString(),
+            status: apt.status.toLowerCase(), // e.g., 'completed', 'upcoming', 'missed'
+            appointmentId: apt.appointment_id
+        }));
+
+        res.json(formattedData);
+    } catch (e) {
+        console.error('❌ Error fetching doctor dashboard:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// 2. Get Specific Patient Details for the Doctor (including Tumor Board Notes)
+app.get('/api/doctor/patient/:opid', authenticateUser, async (req, res) => {
+    const { opid } = req.params;
+
+    try {
+        // Fetch patient details along with their appointments and tumor board notes
+        const { data, error } = await supabase
+            .from('patients')
+            .select(`
+                opid,
+                patient_name,
+                diagnosis,
+                appointments (
+                    appointment_id,
+                    appointment_date,
+                    status,
+                    surgery_required,
+                    tumour_board_recommendations ( recommended_plan )
+                )
+            `)
+            .eq('opid', opid)
+            .single();
+
+        if (error) throw error;
+
+        // Find the most relevant appointment (usually the latest one)
+        // Note: Sorts appointments by date descending to get the newest one first
+        const latestAppointment = data.appointments?.sort(
+            (a, b) => new Date(b.appointment_date) - new Date(a.appointment_date)
+        )[0];
+
+        // Format for the frontend patient details screen
+        const formattedPatientDetails = {
+            opNumber: data.opid,
+            patientName: data.patient_name,
+            status: latestAppointment?.status?.toLowerCase() || 'unknown',
+            procedureName: data.diagnosis,
+            scheduledDate: latestAppointment ? new Date(latestAppointment.appointment_date).toLocaleDateString() : 'Not Scheduled',
+            tumorBoardNotes: latestAppointment?.tumour_board_recommendations?.[0]?.recommended_plan || 'No board recommendations available.',
+            lastUpdated: latestAppointment?.appointment_date || new Date().toISOString()
+        };
+
+        res.json(formattedPatientDetails);
+    } catch (e) {
+        console.error('❌ Error fetching patient details for doctor:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
 
 // Use 0.0.0.0 to ensure it accepts connections from your mobile device on the local Wi-Fi
 app.listen(3000, '0.0.0.0', () => console.log('Server running on port 3000'));
