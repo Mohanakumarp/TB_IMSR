@@ -1,15 +1,17 @@
 // context/AuthContext.tsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../lib/supabase';
 
 export interface User {
   role: 'doctor' | 'patient';
-  sessionToken: string;
   opid?: string;
   doctor_id?: string;
   patient_name?: string;
+  doctor_name?: string;
   name?: string;
   phone_number?: string;
+  phone?: string;
   [key: string]: any;
 }
 
@@ -17,7 +19,7 @@ interface AuthContextType {
   user: User | null;
   login: (userData: User) => void;
   logout: () => void;
-  isLoading: boolean; // Add this so we don't flash the login screen while checking storage
+  isLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -26,16 +28,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 1. Check the phone's hard drive when the app opens
+  // 1. Check stored user data and Supabase session on app start
   useEffect(() => {
     const loadUser = async () => {
       try {
-        const storedUser = await AsyncStorage.getItem('@hospital_user');
-        if (storedUser) {
-          setUser(JSON.parse(storedUser));
+        // Check if Supabase session exists (handles token refresh automatically)
+        const { data: sessionData } = await supabase.auth.getSession();
+        const session = sessionData.session;
+
+        if (session) {
+          // If Supabase session exists, load stored user profile from AsyncStorage
+          const storedUser = await AsyncStorage.getItem('@hospital_user');
+          if (storedUser) {
+            setUser(JSON.parse(storedUser));
+          }
+        } else {
+          // No session means user is logged out
+          setUser(null);
         }
       } catch (error) {
-        console.error("Failed to load user from storage", error);
+        console.error('Failed to load user from storage', error);
       } finally {
         setIsLoading(false);
       }
@@ -43,23 +55,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     loadUser();
   }, []);
 
-  // 2. Save the user to the phone's hard drive when they log in
+  // 2. Save user profile to storage when they log in
   const login = async (userData: User) => {
     setUser(userData);
     try {
+      // Store only the user profile data, NOT the auth token (Supabase handles that)
       await AsyncStorage.setItem('@hospital_user', JSON.stringify(userData));
     } catch (error) {
-      console.error("Failed to save user to storage", error);
+      console.error('Failed to save user to storage', error);
     }
   };
 
-  // 3. Delete the user from the hard drive when they log out
+  // 3. Log out user: clear Supabase session and local storage
   const logout = async () => {
     setUser(null);
     try {
+      // Sign out from Supabase (clears tokens automatically)
+      await supabase.auth.signOut();
+      // Clear stored user profile
       await AsyncStorage.removeItem('@hospital_user');
     } catch (error) {
-      console.error("Failed to remove user from storage", error);
+      console.error('Failed to logout', error);
     }
   };
 

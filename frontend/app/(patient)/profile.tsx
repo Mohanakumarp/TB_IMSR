@@ -1,10 +1,11 @@
 // app/(patient)/profile.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter } from 'expo-router';
+import { apiGet } from '../../lib/apiClient';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://192.168.1.100:3000';
 
@@ -14,20 +15,13 @@ export default function PatientProfile() {
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (user?.opid) fetchProfile();
-  }, [user]);
-
-  const fetchProfile = async () => {
+  // Use useCallback to memoize the fetch function
+  const fetchProfile = useCallback(async () => {
     try {
-      if (!user?.opid) return; 
-      const res = await fetch(`${BACKEND_URL}/api/patient/${user.opid}/profile`, {
-        // ADD THIS HEADERS OBJECT:
-        headers: {
-          'Authorization': `Bearer ${user?.sessionToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      if (!user?.opid) return;
+      
+      // Use the apiGet wrapper which automatically injects the fresh auth token
+      const res = await apiGet(`${BACKEND_URL}/api/patient/${user.opid}/profile`);
 
       if (!res.ok) throw new Error("Unauthorized or failed to fetch");
 
@@ -38,7 +32,15 @@ export default function PatientProfile() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
+
+  // Fetch profile when user changes
+  useEffect(() => {
+    if (user?.opid) {
+      setLoading(true);
+      fetchProfile();
+    }
+  }, [user, fetchProfile]);
 
   const handleLogout = () => {
     logout();

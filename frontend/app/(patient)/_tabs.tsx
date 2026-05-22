@@ -9,8 +9,9 @@ function CustomTabBar() {
   const router = useRouter();
   const active = segments[segments.length - 1] || 'home';
 
-  const tabs = [
+  const tabs: { key: string; label: string; icon: any; route: any }[] = [
     { key: 'home', label: 'Home', icon: 'home-outline', route: '/(patient)/home' },
+    { key: 'dashboard', label: 'Dashboard', icon: 'grid-outline', route: '/(patient)/dashboard' },
     { key: 'notifications', label: 'Notifications', icon: 'notifications-outline', route: '/(patient)/notifications' },
     { key: 'profile', label: 'Profile', icon: 'person-circle-outline', route: '/(patient)/profile' },
   ];
@@ -20,8 +21,8 @@ function CustomTabBar() {
       {tabs.map((t) => {
         const focused = active === t.key;
         return (
-          <Pressable key={t.key} style={styles.tabItem} onPress={() => router.replace(t.route)}>
-            <Ionicons name={focused ? t.icon.replace('-outline','') : t.icon} size={22} color={focused ? '#BA1A21' : '#6b6b6b'} />
+          <Pressable key={t.key} style={styles.tabItem} onPress={() => router.replace(t.route as any)}>
+            <Ionicons name={focused ? (t.icon.replace('-outline', '') as any) : (t.icon as any)} size={22} color={focused ? '#BA1A21' : '#6b6b6b'} />
             <Text style={[styles.tabLabel, { color: focused ? '#BA1A21' : '#6b6b6b' }]}>{t.label}</Text>
           </Pressable>
         );
@@ -37,6 +38,7 @@ export default function PatientTabs() {
       tabBar={() => <CustomTabBar />}
     >
       <Tabs.Screen name="home" options={{ title: 'Home' }} />
+      <Tabs.Screen name="dashboard" options={{ title: 'Dashboard' }} />
       <Tabs.Screen name="notifications" options={{ title: 'Notifications' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
     </Tabs>
