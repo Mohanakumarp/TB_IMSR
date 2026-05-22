@@ -1,5 +1,5 @@
 // mock/data.ts
-import { PatientCardData, PatientDetailData } from '../types';
+import { FullPatientProfile, PatientCardData, PatientDetailData } from '../types';
 
 // 1. THIS BUILDS THE 6-BOX DASHBOARD (The Array)
 export const mockDashboardData: PatientCardData[] = [

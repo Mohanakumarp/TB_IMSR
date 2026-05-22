@@ -33,6 +33,9 @@ const authenticateUser = async (req, res, next) => {
             return res.status(401).json({ error: "Unauthorized access: Invalid or expired token." });
         }
 
+        req.authUser = user;
+        req.authToken = token;
+
         // Token is good! Let the request proceed to the actual route
         next();
     } catch (e) {
@@ -266,6 +269,203 @@ app.get('/api/doctor/patient/:opid', authenticateUser, async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
+
+// ==========================================
+// PATIENT CHAT ROUTE
+// ==========================================
+app.post('/api/chat', authenticateUser, async (req, res) => {
+    try {
+        const { message, patient: clientPatient } = req.body;
+
+        if (!message || typeof message !== 'string') {
+            return res.status(400).json({ error: 'Message is required.' });
+        }
+
+        const requestedOpNumber = (clientPatient?.opNumber || req.authUser?.user_metadata?.opid || req.authUser?.user_metadata?.opNumber || '').toString().trim();
+
+        if (!requestedOpNumber) {
+            return res.status(400).json({ error: 'Patient OP number is required for chat.' });
+        }
+
+        const { data: patientRecord, error: patientError } = await supabase
+            .from('patients')
+            .select('*')
+            .ilike('opid', requestedOpNumber)
+            .single();
+
+        if (patientError || !patientRecord) {
+            console.error('❌ Patient lookup failed:', patientError?.message, 'Requested OP:', requestedOpNumber);
+            return res.status(404).json({ error: 'No patient record found for the requested OP number.' });
+        }
+
+        const normalizePhone = (value) => (value || '')
+            .toString()
+            .replace(/\D/g, '')
+            .slice(-10);
+
+        const authPhone = req.authUser?.phone || req.authUser?.user_metadata?.phone || req.authUser?.user_metadata?.phone_number;
+        if (authPhone && patientRecord.phone_number) {
+            const normalizedAuthPhone = normalizePhone(authPhone);
+            const normalizedPatientPhone = normalizePhone(patientRecord.phone_number);
+
+            if (!normalizedAuthPhone || !normalizedPatientPhone) {
+                console.error('❌ Unable to normalize phone numbers for comparison:', authPhone, patientRecord.phone_number);
+            } else if (normalizedAuthPhone !== normalizedPatientPhone) {
+                console.error('❌ Authenticated phone does not match patient phone:', normalizedAuthPhone, normalizedPatientPhone, authPhone, patientRecord.phone_number);
+                return res.status(403).json({ error: 'Authenticated user does not match the requested patient record.' });
+            }
+        }
+
+        if (clientPatient?.opNumber && clientPatient.opNumber.toString().trim().toLowerCase() !== patientRecord.opid.toString().trim().toLowerCase()) {
+            return res.status(403).json({ error: 'Requested patient context does not match the authenticated patient.' });
+        }
+
+        const { data: appointmentRows, error: appointmentError } = await supabase
+            .from('appointments')
+            .select(`
+                appointment_id,
+                appointment_date,
+                status,
+                surgery_required,
+                tumour_board_recommendations ( recommended_plan ),
+                doctors ( name )
+            `)
+            .eq('opid', patientRecord.opid)
+            .order('appointment_date', { ascending: false });
+
+        if (appointmentError) {
+            throw appointmentError;
+        }
+
+        const patientHistory = (appointmentRows || []).map((appointment) => ({
+            appointmentId: appointment.appointment_id,
+            scheduledDate: appointment.appointment_date,
+            status: appointment.status,
+            surgeryRequired: appointment.surgery_required,
+            doctorName: appointment.doctors?.name || null,
+            tumorBoardNotes: appointment.tumour_board_recommendations?.recommended_plan || null,
+        }));
+
+        const upcomingAppointment = (appointmentRows || []).find((appointment) => {
+            const statusValue = (appointment.status || '').toString().toLowerCase();
+            return statusValue === 'scheduled' || statusValue === 'upcoming';
+        }) || appointmentRows?.[0] || null;
+
+        const systemPrompt = [
+            'You are the PSG Hospitals patient assistant for the EMR-Integrated Tumor Board Monitoring System.',
+            'Answer only from the patient context provided below.',
+            'If a detail is not present in the patient context, say you do not have that information.',
+            'Do not invent dates, diagnoses, procedures, or instructions.',
+            'Keep the answer concise and patient-friendly.',
+            '',
+            `Patient: ${patientRecord.patient_name || 'Unknown'} (${patientRecord.opid || 'N/A'})`,
+            'Patient context (JSON):',
+            JSON.stringify({
+                profile: {
+                    opid: patientRecord.opid,
+                    patient_name: patientRecord.patient_name,
+                    diagnosis: patientRecord.diagnosis || null,
+                },
+                upcomingAppointment,
+                history: patientHistory,
+            }, null, 2),
+        ].join('\n');
+
+        // Replace this fallback with your real local inference or RAG call.
+        // Example options:
+        // - A local LLM endpoint (Ollama, vLLM, LM Studio, etc.)
+        // - A custom retrieval layer that first fetches relevant history chunks
+        //   and then passes them to the model as the system prompt.
+        let reply;
+        try {
+            reply = await runLocalSlm({
+                systemPrompt,
+                message,
+                patient: patientRecord,
+                history: patientHistory,
+            });
+        } catch (modelError) {
+            console.error('⚠️ Local SLM failed, using fallback response:', modelError?.message || modelError);
+            reply = buildFallbackPatientReply({ message, patient: patientRecord, history: patientHistory, upcomingAppointment });
+        }
+
+        return res.json({ reply });
+    } catch (e) {
+        console.error('❌ Chat route error:', e.message);
+        return res.status(500).json({ error: 'Failed to generate chat response.' });
+    }
+});
+
+async function runLocalSlm({ systemPrompt, message, patient, history }) {
+    const localEndpoint = process.env.LOCAL_SLM_URL;
+
+    if (localEndpoint) {
+        const controller = new AbortController();
+        const timeoutMs = Number(process.env.SLM_TIMEOUT_MS || 45000);
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        let response;
+        try {
+            response = await fetch(localEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    systemPrompt,
+                    message,
+                    patient,
+                    history,
+                }),
+                signal: controller.signal,
+            });
+        } catch (fetchError) {
+            if (fetchError?.name === 'AbortError') {
+                throw new Error(`Local SLM request timed out after ${timeoutMs}ms`);
+            }
+            throw fetchError;
+        } finally {
+            clearTimeout(timeoutId);
+        }
+
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => '');
+            throw new Error(`Local SLM request failed with status ${response.status}${errorText ? `: ${errorText}` : ''}`);
+        }
+
+        const data = await response.json();
+        return data.reply || data.answer || data.text || 'No response returned by the local model.';
+    }
+
+    const latest = history[0];
+    const summary = latest
+        ? `Your latest recorded procedure is ${latest.scheduledDate ? `scheduled on ${new Date(latest.scheduledDate).toLocaleDateString()}` : 'on file'}${latest.tumorBoardNotes ? `, with notes: ${latest.tumorBoardNotes}` : ''}.`
+        : 'No procedure history is available in the database yet.';
+
+    return `${summary} This answer was generated from the authenticated patient record only. Configure LOCAL_SLM_URL to connect your local model server and get model-generated responses.`;
+}
+
+function buildFallbackPatientReply({ message, patient, history, upcomingAppointment }) {
+    const lower = (message || '').toLowerCase();
+
+    if (!history || history.length === 0) {
+        return `Hello ${patient?.patient_name || 'Patient'}. I could not reach the AI service right now, but your record currently shows no procedure history. Please contact your coordinator for the latest update.`;
+    }
+
+    if (lower.includes('next') || lower.includes('appointment') || lower.includes('schedule') || lower.includes('when')) {
+        if (upcomingAppointment) {
+            const when = upcomingAppointment.appointment_date
+                ? new Date(upcomingAppointment.appointment_date).toLocaleString()
+                : 'date not available';
+            return `Your next recorded appointment is on ${when}. If you need to reschedule, please contact PSG Hospitals support.`;
+        }
+        return 'I could not find an upcoming appointment in your record right now. Please check with your care coordinator.';
+    }
+
+    const latest = history[0];
+    const latestDate = latest?.scheduledDate ? new Date(latest.scheduledDate).toLocaleDateString() : 'not available';
+    const notes = latest?.tumorBoardNotes || 'No tumor board notes are available for the latest record.';
+
+    return `I could not reach the AI service, so I am using your EMR data directly. Latest procedure date: ${latestDate}. Tumor board note: ${notes}`;
+}
 
 // Use 0.0.0.0 to ensure it accepts connections from your mobile device on the local Wi-Fi
 app.listen(3000, '0.0.0.0', () => console.log('Server running on port 3000'));
