@@ -94,7 +94,7 @@ export default function DoctorProfile() {
         {/* Action Button */}
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.8}>
           <Ionicons name="log-out-outline" size={20} color="#FFFFFF" />
-          <Text style={styles.logoutButtonText}>Terminate Session</Text>
+          <Text style={styles.logoutButtonText}>Sign Out</Text>
         </TouchableOpacity>
 
         <Text style={styles.appVersionText}>PSG Tumor Board Portal v2.0.26</Text>

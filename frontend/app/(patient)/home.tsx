@@ -60,7 +60,7 @@ export default function PatientHome() {
     const statusStyle = getStatusStyle(item.status);
 
     return (
-      <TouchableOpacity style={styles.card} onPress={() => router.push(`/(patient)/procedure/${item.appointment_id}`)}>
+      <TouchableOpacity style={styles.card}>
         <View style={styles.cardHeader}>
           <Text style={styles.dateText}>
             <Ionicons name="calendar-outline" size={14} color="#828282" /> {formatDateTime(item.appointment_date)}
@@ -75,10 +75,10 @@ export default function PatientHome() {
           {item.tumour_board_recommendations?.recommended_plan || 'Consultation'}
         </Text>
         
-        <View style={styles.cardFooter}>
+        <TouchableOpacity style={styles.cardFooter} onPress={() => router.push({ pathname: '/(patient)/dashboard', params: { id: item.appointment_id } })}>
           <Text style={styles.tapPrompt}>View details & instructions</Text>
           <Ionicons name="chevron-forward" size={16} color="#BA1A21" />
-        </View>
+        </TouchableOpacity>
       </TouchableOpacity>
     );
   };

@@ -3,3 +3,5 @@ cors
 dotenv 
 @supabase/supabase-js 
 jsonwebtoken
+bcrypt 
+twilio 

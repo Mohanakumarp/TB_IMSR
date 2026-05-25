@@ -109,13 +109,13 @@ export default function OtpScreen() {
                 // NOTE: No longer passing sessionToken. Only pass user profile data.
                 login({ role: 'doctor', ...backendUser });
             }
-            router.replace('/(doctor)/dashboard');
+            router.replace('/(doctor)/(tabs)/dashboard');
         } else {
             if (login) {
                 // NOTE: No longer passing sessionToken. Only pass user profile data.
                 login({ role: 'patient', ...backendUser });
             }
-            router.replace('/(patient)/dashboard');
+            router.replace('/(patient)/home');
         }
 
     } catch (e: any) {

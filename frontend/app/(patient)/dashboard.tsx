@@ -3,45 +3,50 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { apiGet } from '../../lib/apiClient';
-
+import { useLocalSearchParams } from 'expo-router'; // <-- Add this
 // Make sure to set your backend URL in your .env file
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://192.168.1.100:3000';
 
 export default function PatientDashboard() {
   const { user } = useAuth();
+  const { id } = useLocalSearchParams(); // <-- Read the ID passed from Home
   const [appointment, setAppointment] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Use useCallback to memoize the fetch function
-  const fetchLatestAppointment = useCallback(async () => {
+  const fetchAppointmentDetails = useCallback(async () => {
     try {
       if (!user?.opid) return;
       
-      // Use the apiGet wrapper which automatically injects the fresh auth token
       const res = await apiGet(`${BACKEND_URL}/api/patient/${user.opid}/appointments`);
       
       if (!res.ok) throw new Error("Failed to fetch appointments");
       
       const data = await res.json();
       
-      // Grab the most relevant appointment (you can adjust this logic, e.g., filter by 'Scheduled' first)
       if (data && data.length > 0) {
-        setAppointment(data[0]); 
+        // If we received an ID from the home screen, find that specific appointment
+        if (id) {
+          const selectedAppointment = data.find((app: any) => app.appointment_id === id);
+          setAppointment(selectedAppointment || data[0]); // Fallback to first if not found
+        } else {
+          // If no ID was passed (e.g., navigated directly from a tab bar), just show the newest one
+          setAppointment(data[0]); 
+        }
       }
     } catch (error) {
       console.error("Dashboard fetch error:", error);
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, id]); // <-- Add 'id' to dependencies
 
-  // Fetch when user changes
+  // Fetch when user or id changes
   useEffect(() => {
     if (user?.opid) {
       setLoading(true);
-      fetchLatestAppointment();
+      fetchAppointmentDetails();
     }
-  }, [user, fetchLatestAppointment]);
+  }, [user, fetchAppointmentDetails]);
 
   const getPatientMessage = (status: string) => {
     switch (status) {

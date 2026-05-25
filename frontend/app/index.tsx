@@ -1,8 +1,9 @@
 // app/index.tsx
 import React, { useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
+import { getCoordinatorToken } from '../lib/coordinatorClient';
 
 export default function IndexScreen() {
   const { user, isLoading } = useAuth();
@@ -11,24 +12,22 @@ export default function IndexScreen() {
   useEffect(() => {
     if (isLoading) return;
 
-    if (user) {
-      if (user.role === 'patient') {
-        router.replace('/(patient)/home');
-      } else if (user.role === 'doctor') {
-        router.replace('/(doctor)/dashboard');
-      }
-    } else {
-      router.replace('/(auth)/login');
+    // Check if coordinator is logged in
+    const coordinatorToken = getCoordinatorToken();
+    if (coordinatorToken) {
+      router.replace('/(coordinator)/dashboard' as any);
+      return;
     }
-  }, [user, isLoading]);
 
-  return (
-    <View style={styles.container}>
-      <ActivityIndicator size="large" color="#BA1A21" />
-    </View>
-  );
+    // Check if patient/doctor is logged in
+    if (!user) {
+      router.replace('/(auth)/login');
+    } else if (user.role === 'patient') {
+      router.replace('/(patient)/home');
+    } else if (user.role === 'doctor') {
+      router.replace('/(doctor)/(tabs)/dashboard');
+    }
+  }, [user, isLoading, router]);
+
+  return <View />;
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F5F5F5' },
-});

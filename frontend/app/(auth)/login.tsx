@@ -112,6 +112,14 @@ export default function Login() {
               </View>
             </ScrollView>
 
+            {/* Footer - Coordinator Portal Link */}
+            <View style={styles.coordinatorSection}>
+              <Text style={styles.coordinatorText}>Are you a coordinator?</Text>
+              <TouchableOpacity onPress={() => router.push('/(auth)/coordinator-login' as any)}>
+                <Text style={[styles.linkText, { textAlign: 'center', marginTop: 6 }]}>Access Coordinator Portal</Text>
+              </TouchableOpacity>
+            </View>
+
             {!keyboardVisible && (
               <View style={styles.footer} pointerEvents="none">
                 <Text style={styles.footerText}>Copyright © PSG Hospitals 2026 | All Rights Reserved</Text>
@@ -142,6 +150,29 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 8, padding: 12, fontSize: 15, color: '#333333', backgroundColor: '#FAFAFA' },
   primaryButton: { backgroundColor: '#BA1A21', paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8 },
   primaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' },
-  footer: { backgroundColor: '#BA1A21', paddingVertical: 12, alignItems: 'center', borderTopWidth: 1, borderTopColor: '#A01520' },
-  footerText: { color: '#FFFFFF', fontSize: 12, textAlign: 'center' },
+  footer: {
+    marginBottom: 20,
+  },
+  footerText: {
+    textAlign: 'center',
+    color: '#999999',
+    fontSize: 14,
+  },
+  linkText: {
+    color: '#BA1A21',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  coordinatorSection: {
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+    marginTop: 16,
+  },
+  coordinatorText: {
+    textAlign: 'center',
+    color: '#666666',
+    fontSize: 14,
+    marginBottom: 8,
+  },
 });

@@ -3,7 +3,13 @@ import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 dotenv.config();
 import cors from 'cors';
+import bcrypt from 'bcrypt';
+import twilio from 'twilio';
+import jwt from 'jsonwebtoken';
 
+// Initialize Twilio
+const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+const twilioWhatsApp = process.env.TWILIO_WHATSAPP_NUMBER; // e.g., 'whatsapp:+14155238886'
 const app = express();
 app.use(express.json());
 app.use(cors());
@@ -41,6 +47,22 @@ const authenticateUser = async (req, res, next) => {
     } catch (e) {
         console.error('❌ Middleware Server Error:', e.message);
         return res.status(500).json({ error: "Internal server error during authentication." });
+    }
+};
+
+// Custom middleware for Coordinator routes
+const authenticateCoordinator = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: "Missing token" });
+    
+    const token = authHeader.split(' ')[1];
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if (decoded.role !== 'coordinator') throw new Error('Not a coordinator');
+        req.coordinator = decoded;
+        next();
+    } catch (e) {
+        res.status(403).json({ error: "Unauthorized access." });
     }
 };
 
@@ -466,6 +488,252 @@ function buildFallbackPatientReply({ message, patient, history, upcomingAppointm
 
     return `I could not reach the AI service, so I am using your EMR data directly. Latest procedure date: ${latestDate}. Tumor board note: ${notes}`;
 }
+
+
+// ==========================================
+// COORDINATOR AUTHENTICATION
+// ==========================================
+
+// COORDINATOR ROUTES
+
+// 1. Coordinator Login
+// Make sure to import bcrypt at the top of your file if you haven't already:
+// const bcrypt = require('bcrypt');
+
+app.post('/api/coordinator/login', async (req, res) => {
+  try {
+    const { login_id, password } = req.body;
+
+    if (!login_id || !password) {
+      return res.status(400).json({ error: 'Missing login_id or password' });
+    }
+
+    // 1. Fetch coordinator from database
+    const { data: coordinator, error } = await supabase
+      .from('coordinators')
+      .select('*')
+      .eq('login_id', login_id)
+      .single();
+
+    if (error || !coordinator) {
+      return res.status(401).json({ error: 'Invalid coordinator' });
+    }
+
+    // 2. Compare password using bcrypt!
+    const isMatch = await bcrypt.compare(password, coordinator.password_hash);
+    
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid password' });
+    }
+
+    // 3. Generate JWT token for coordinator
+    const token = jwt.sign(
+      { coordinator_id: coordinator.coordinator_id, type: 'coordinator' },
+      process.env.JWT_SECRET,
+      { expiresIn: '12h' }
+    );
+
+    // 4. Return the token (fixed variable name here)
+    return res.json({
+      coordinator_id: coordinator.coordinator_id,
+      name: coordinator.name,
+      login_id: coordinator.login_id,
+      token: token 
+    });
+    
+  } catch (error) {
+    console.error('Coordinator login error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+// 2. Middleware to verify coordinator token
+const verifyCoordinatorToken = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'No token provided' });
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    if (decoded.type !== 'coordinator') {
+      return res.status(403).json({ error: 'Not a coordinator' });
+    }
+    req.coordinator_id = decoded.coordinator_id;
+    next();
+  } catch (error) {
+    res.status(401).json({ error: 'Invalid or expired token' });
+  }
+};
+
+// 3. Get all patients (for coordinator to see available patients)
+app.get('/api/coordinator/patients', verifyCoordinatorToken, async (req, res) => {
+  try {
+    const { data: patients, error } = await supabase
+      .from('patients')
+      .select('opid, patient_name, phone_number, diagnosis, primary_doctor_id')
+      .order('patient_name', { ascending: true });
+
+    if (error) throw error;
+    res.json(patients);
+  } catch (error) {
+    console.error('Fetch patients error:', error);
+    res.status(500).json({ error: 'Failed to fetch patients' });
+  }
+});
+
+// 4. Get all doctors (for coordinator to assign to appointments)
+app.get('/api/coordinator/doctors', verifyCoordinatorToken, async (req, res) => {
+  try {
+    const { data: doctors, error } = await supabase
+      .from('doctors')
+      .select('doctor_id, name, department, phone_number')
+      .order('name', { ascending: true });
+
+    if (error) throw error;
+    res.json(doctors);
+  } catch (error) {
+    console.error('Fetch doctors error:', error);
+    res.status(500).json({ error: 'Failed to fetch doctors' });
+  }
+});
+
+// 5. Create appointment (allocate appointment to patient)
+app.post('/api/coordinator/appointments', verifyCoordinatorToken, async (req, res) => {
+  try {
+    const { opid, doctor_id, appointment_date, surgery_required, recommended_plan } = req.body;
+
+    if (!opid || !doctor_id || !appointment_date) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Create appointment
+    const { data: appointment, error: appointmentError } = await supabase
+      .from('appointments')
+      .insert([
+        {
+          opid,
+          doctor_id,
+          appointment_date,
+          surgery_required: surgery_required || false,
+          status: 'Scheduled'
+        }
+      ])
+      .select()
+      .single();
+
+    if (appointmentError) throw appointmentError;
+
+    // Create tumour board recommendation if provided
+    if (recommended_plan) {
+      const { data: recommendation, error: recommendationError } = await supabase
+        .from('tumour_board_recommendations')
+        .insert([
+          {
+            appointment_id: appointment.appointment_id,
+            recommended_plan
+          }
+        ]);
+
+      if (recommendationError) {
+        console.error('Recommendation creation warning:', recommendationError);
+        // Don't fail the entire request if recommendation fails
+      }
+    }
+
+    res.status(201).json({
+      message: 'Appointment created successfully',
+      appointment
+    });
+  } catch (error) {
+    console.error('Create appointment error:', error);
+    res.status(500).json({ error: 'Failed to create appointment' });
+  }
+});
+
+// 6. Get appointments (for coordinator to manage)
+app.get('/api/coordinator/appointments', verifyCoordinatorToken, async (req, res) => {
+  try {
+    const { data: appointments, error } = await supabase
+      .from('appointments')
+      .select(`
+        appointment_id,
+        opid,
+        doctor_id,
+        appointment_date,
+        status,
+        surgery_required,
+        patients(patient_name, diagnosis),
+        doctors(name, department),
+        tumour_board_recommendations(recommended_plan)
+      `)
+      .order('appointment_date', { ascending: false });
+
+    if (error) throw error;
+    res.json(appointments);
+  } catch (error) {
+    console.error('Fetch appointments error:', error);
+    res.status(500).json({ error: 'Failed to fetch appointments' });
+  }
+});
+
+// 7. Update appointment status (cancel, complete, etc.)
+app.put('/api/coordinator/appointments/:appointment_id', verifyCoordinatorToken, async (req, res) => {
+  try {
+    const { appointment_id } = req.params;
+    const { status, recommended_plan } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required' });
+    }
+
+    // Update appointment status
+    const { data: appointment, error: appointmentError } = await supabase
+      .from('appointments')
+      .update({ status })
+      .eq('appointment_id', appointment_id)
+      .select()
+      .single();
+
+    if (appointmentError) throw appointmentError;
+
+    // Update recommendation if provided
+    if (recommended_plan) {
+      const { error: recommendationError } = await supabase
+        .from('tumour_board_recommendations')
+        .update({ recommended_plan })
+        .eq('appointment_id', appointment_id);
+
+      if (recommendationError) {
+        console.error('Recommendation update warning:', recommendationError);
+      }
+    }
+
+    res.json({
+      message: 'Appointment updated successfully',
+      appointment
+    });
+  } catch (error) {
+    console.error('Update appointment error:', error);
+    res.status(500).json({ error: 'Failed to update appointment' });
+  }
+});
+
+// 8. Delete appointment
+app.delete('/api/coordinator/appointments/:appointment_id', verifyCoordinatorToken, async (req, res) => {
+  try {
+    const { appointment_id } = req.params;
+
+    const { error } = await supabase
+      .from('appointments')
+      .delete()
+      .eq('appointment_id', appointment_id);
+
+    if (error) throw error;
+
+    res.json({ message: 'Appointment deleted successfully' });
+  } catch (error) {
+    console.error('Delete appointment error:', error);
+    res.status(500).json({ error: 'Failed to delete appointment' });
+  }
+});
 
 // Use 0.0.0.0 to ensure it accepts connections from your mobile device on the local Wi-Fi
 app.listen(3000, '0.0.0.0', () => console.log('Server running on port 3000'));
