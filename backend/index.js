@@ -23,12 +23,20 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 // This function intercepts requests to make sure the user has a valid session token
 const authenticateUser = async (req, res, next) => {
     const authHeader = req.headers.authorization;
-    
+    // 🛑 DEBUGGING LOGS 🛑
+    // console.log("👉 1. Raw Auth Header:", authHeader);
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).json({ error: "Missing or invalid authorization header. Please log in." });
     }
 
     const token = authHeader.split(' ')[1];
+    // 🛑 DEBUGGING LOGS 🛑
+    // console.log("👉 2. Extracted Token:", token);
+    // console.log("👉 3. Token Length:", token ? token.length : 0);
+    // NEW: Catch tokens that evaluated to the string "null" or "undefined" on the frontend
+    if (!token || token === 'null' || token === 'undefined') {
+        return res.status(401).json({ error: "Token is null or undefined. Please log in again." });
+    }
 
     try {
         // Ask Supabase if this token is real and hasn't expired
@@ -495,11 +503,35 @@ function buildFallbackPatientReply({ message, patient, history, upcomingAppointm
 // ==========================================
 
 // COORDINATOR ROUTES
+// ==========================================
+// TWILIO HELPER FUNCTION
+// ==========================================
+const sendWhatsAppMessage = async (toNumber, messageBody) => {
+    if (!toNumber) return;
+    
+    // Normalize phone number (ensure +91 and whatsapp: prefix)
+    let formattedNumber = toNumber.toString().trim().replace(/\s+/g, '');
+    if (!formattedNumber.startsWith('+')) {
+        formattedNumber = formattedNumber.startsWith('91') ? `+${formattedNumber}` : `+91${formattedNumber}`;
+    }
+    if (!formattedNumber.startsWith('whatsapp:')) {
+        formattedNumber = `whatsapp:${formattedNumber}`;
+    }
 
+    try {
+        const message = await twilioClient.messages.create({
+            body: messageBody,
+            from: twilioWhatsApp, // Your Twilio Sandbox Number
+            to: formattedNumber
+        });
+        console.log(`✅ WhatsApp sent to ${formattedNumber}. SID: ${message.sid}`);
+    } catch (error) {
+        console.error(`❌ Twilio WhatsApp Error for ${formattedNumber}:`, error.message);
+    }
+};
 // 1. Coordinator Login
 // Make sure to import bcrypt at the top of your file if you haven't already:
 // const bcrypt = require('bcrypt');
-
 app.post('/api/coordinator/login', async (req, res) => {
   try {
     const { login_id, password } = req.body;
@@ -604,44 +636,53 @@ app.post('/api/coordinator/appointments', verifyCoordinatorToken, async (req, re
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Create appointment
+    // 1. Create appointment
     const { data: appointment, error: appointmentError } = await supabase
       .from('appointments')
-      .insert([
-        {
+      .insert([{
           opid,
           doctor_id,
           appointment_date,
           surgery_required: surgery_required || false,
           status: 'Scheduled'
-        }
-      ])
+      }])
       .select()
       .single();
 
     if (appointmentError) throw appointmentError;
 
-    // Create tumour board recommendation if provided
+    // 2. Create tumour board recommendation if provided
     if (recommended_plan) {
-      const { data: recommendation, error: recommendationError } = await supabase
+      const { error: recommendationError } = await supabase
         .from('tumour_board_recommendations')
-        .insert([
-          {
-            appointment_id: appointment.appointment_id,
-            recommended_plan
-          }
-        ]);
+        .insert([{ appointment_id: appointment.appointment_id, recommended_plan }]);
 
-      if (recommendationError) {
-        console.error('Recommendation creation warning:', recommendationError);
-        // Don't fail the entire request if recommendation fails
-      }
+      if (recommendationError) console.error('Recommendation warning:', recommendationError);
     }
 
-    res.status(201).json({
-      message: 'Appointment created successfully',
-      appointment
-    });
+    // ---------------------------------------------------------
+    // 3. WHATSAPP NOTIFICATION LOGIC (TO PATIENT)
+    // ---------------------------------------------------------
+    try {
+        // Fetch patient and assigned doctor details
+        const { data: patient } = await supabase.from('patients').select('patient_name, phone_number').eq('opid', opid).single();
+        const { data: doctor } = await supabase.from('doctors').select('name').eq('doctor_id', doctor_id).single();
+
+        if (patient && patient.phone_number) {
+            const dateStr = new Date(appointment_date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+            const typeStr = surgery_required ? 'Surgical Procedure' : 'Consultation';
+            
+            const msg = `🏥 *PSG Hospitals*\n\nHello ${patient.patient_name},\n\nYour ${typeStr} with ${doctor?.name || 'your doctor'} has been scheduled for *${dateStr}*.\n\nPlease check your patient app for any pre-procedure instructions.`;
+            
+            // Send message in the background (no await) so the frontend doesn't hang waiting for Twilio
+            sendWhatsAppMessage(patient.phone_number, msg);
+        }
+    } catch (notifyError) {
+        console.error('Failed to send creation WhatsApp:', notifyError);
+    }
+    // ---------------------------------------------------------
+
+    res.status(201).json({ message: 'Appointment created successfully', appointment });
   } catch (error) {
     console.error('Create appointment error:', error);
     res.status(500).json({ error: 'Failed to create appointment' });
@@ -684,7 +725,7 @@ app.put('/api/coordinator/appointments/:appointment_id', verifyCoordinatorToken,
       return res.status(400).json({ error: 'Status is required' });
     }
 
-    // Update appointment status
+    // 1. Update appointment status
     const { data: appointment, error: appointmentError } = await supabase
       .from('appointments')
       .update({ status })
@@ -694,22 +735,52 @@ app.put('/api/coordinator/appointments/:appointment_id', verifyCoordinatorToken,
 
     if (appointmentError) throw appointmentError;
 
-    // Update recommendation if provided
+    // 2. Update recommendation if provided
     if (recommended_plan) {
-      const { error: recommendationError } = await supabase
+      const { error: recError } = await supabase
         .from('tumour_board_recommendations')
         .update({ recommended_plan })
         .eq('appointment_id', appointment_id);
 
-      if (recommendationError) {
-        console.error('Recommendation update warning:', recommendationError);
-      }
+      if (recError) console.error('Recommendation update warning:', recError);
     }
 
-    res.json({
-      message: 'Appointment updated successfully',
-      appointment
-    });
+    // ---------------------------------------------------------
+    // 3. WHATSAPP NOTIFICATION LOGIC (TO PRIMARY DOCTOR)
+    // ---------------------------------------------------------
+    if (status === 'Completed') {
+        try {
+            // Fetch the appointment's patient, and that patient's primary doctor ID
+            const { data: aptData } = await supabase
+                .from('appointments')
+                .select(`patients ( patient_name, primary_doctor_id )`)
+                .eq('appointment_id', appointment_id)
+                .single();
+
+            const primaryDoctorId = aptData?.patients?.primary_doctor_id;
+            const patientName = aptData?.patients?.patient_name;
+
+            if (primaryDoctorId && patientName) {
+                // Fetch the primary doctor's phone number
+                const { data: primaryDoctor } = await supabase
+                    .from('doctors')
+                    .select('name, phone_number')
+                    .eq('doctor_id', primaryDoctorId)
+                    .single();
+
+                if (primaryDoctor && primaryDoctor.phone_number) {
+                    const msg = `⚕️ *EMR Alert*\n\nHello ${primaryDoctor.name},\n\nThe scheduled procedure/consultation for your primary patient *${patientName}* has just been marked as *Completed* by the coordinator.\n\nPlease review their updated EMR notes when available.`;
+                    
+                    sendWhatsAppMessage(primaryDoctor.phone_number, msg);
+                }
+            }
+        } catch (notifyError) {
+            console.error('Failed to send completion WhatsApp:', notifyError);
+        }
+    }
+    // ---------------------------------------------------------
+
+    res.json({ message: 'Appointment updated successfully', appointment });
   } catch (error) {
     console.error('Update appointment error:', error);
     res.status(500).json({ error: 'Failed to update appointment' });
